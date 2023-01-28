@@ -1,5 +1,7 @@
-use axum::{routing::get, Router};
-use hyper::{client::HttpConnector, Body};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use std::net::SocketAddr;
 use tower_http::{
     compression::CompressionLayer,
@@ -7,11 +9,25 @@ use tower_http::{
 };
 use tracing::info;
 
-type Client = hyper::client::Client<HttpConnector, Body>;
-
 mod handlers;
-use handlers::{hello_world, proxy};
 
+/* *
+Proxy is not our job, it should be the work of NGINX
+    this system requires an `ingress.yml` and matching NGINX config files.
+Workflow:
+    1.
+        a. user sends a request to update ingress.yml
+            POST /ingress
+            - auth: <auth-key>
+            - body: ingress.yml
+        b. server reads ingress.yml and updates NGINX config
+            b.1. create NGINX config files from fields in ingress.yml
+            b.2. reload NGINX
+    2. user sends a request to update module
+        POST /ingress/services
+        - auth: <auth-key>
+        - body: <file to be run, extracted for run>
+*/
 // TODO: read ingress.yml config file to get routings for proxy
 // TODO: support update ingress.yml on the fly
 //          `PUT        /ingress`
@@ -25,11 +41,9 @@ pub async fn main() {
         .with_target(false)
         .init();
 
-    let client = Client::new();
     let app: Router = Router::new()
-        .route("/ingress", get(hello_world))
-        .fallback(proxy)
-        .with_state(client)
+        .route("/ingress", get(handlers::hello_world))
+        .route("/ingress", post(handlers::update_ingressyml))
         .layer(CompressionLayer::new())
         .layer(
             TraceLayer::new_for_http()
@@ -48,53 +62,3 @@ pub async fn main() {
         .await
         .unwrap();
 }
-
-/* 
-use axum::{routing::get, Router};
-use hyper::{Body, Method, Request};
-use std::net::SocketAddr;
-use tower::{make::Shared, ServiceExt};
-use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
-
-use tracing::info;
-use tracing_subscriber::util::SubscriberInitExt;
-
-mod handlers;
-use handlers::{hello_world, proxy};
-
-#[tokio::main]
-pub async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "example_http_proxy=trace,tower_http=debug".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-
-    let router_svc: Router = Router::new().route("/ingress", get(hello_world));
-
-    let service = tower::service_fn(move |req: Request<Body>| {
-        let router_svc = router_svc.clone();
-        async move {
-            if req.method() == Method::CONNECT {
-                proxy(req).await
-            } else {
-                router_svc.oneshot(req).await.map_err(|err| match err {})
-            }
-        }
-    });
-
-
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
-
-    info!("Listening on {}", addr);
-
-    axum::Server::bind(&addr)
-        .http1_preserve_header_case(true)
-        .http1_title_case_headers(true)
-        .serve(Shared::new(service))
-        .await
-        .unwrap();
-}
-*/
