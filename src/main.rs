@@ -10,6 +10,7 @@ use tower_http::{
 use tracing::info;
 
 mod handlers;
+mod workers;
 
 /* *
 Proxy is not our job, it should be the work of NGINX
